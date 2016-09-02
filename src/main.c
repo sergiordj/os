@@ -20,34 +20,31 @@ static void * tarea2(void * param);
 /*==================[external data definition]===============================*/
 
 /* pilas de cada tarea */
-uint32_t stack1[STACK_SIZE/4];
-uint32_t stack2[STACK_SIZE/4];
+uint8_t stack1[STACK_SIZE];
+uint8_t stack2[STACK_SIZE];
 
-taskControlBlock task_list[] = {
-		{0, stack1, STACK_SIZE, tarea1, (void *)0xAAAAAAAA},
-		{0, stack2, STACK_SIZE, tarea2, (void *)0xBBBBBBBB}
+const taskDefinition task_list[TASK_COUNT] = {
+		{stack1, STACK_SIZE, tarea1, (void *)0xAAAAAAAA},
+		{stack2, STACK_SIZE, tarea2, (void *)0xBBBBBBBB}
 };
-
-const size_t task_count = sizeof(task_list) / sizeof(taskControlBlock);
 
 /*==================[internal functions definition]==========================*/
 
 static void * tarea1(void * param)
 {
-	int i;
 	while (1) {
 		Board_LED_Toggle(0);
-		for (i=0; i<0x3FFFFF; i++);
+		delay(500);
 	}
 	return (void *)0; /* a dónde va? */
 }
 
 static void * tarea2(void * param)
 {
-	int j;
+	int j=4;
 	while (j) {
-		Board_LED_Toggle(2);
-		for (j=0; j<0xFFFFF; j++);
+		Board_LED_Toggle(3);
+		delay(1000);
 	}
 	return (void *)4; /* a dónde va? */
 }
