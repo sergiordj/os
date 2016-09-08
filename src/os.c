@@ -13,6 +13,10 @@
 /** id de tarea inválida */
 #define INVALID_TASK ((uint32_t)-1)
 
+/** id de tarea idle */
+#define IDLE_TASK (TASK_COUNT)
+
+/** tamaño de stack de tarea idle */
 #define STACK_IDLE_SIZE 256
 
 /** estructura interna de control de tareas */
@@ -121,81 +125,53 @@ void delay(uint32_t milliseconds)
  */
 int32_t getNextContext(int32_t current_context)
 {
-	//Guardamos el estado anterior (current_task es una variable global)
 	uint32_t previous_task = current_task;
+	uint32_t returned_stack;
+	taskState state;
 
-
-	//Verificamos si está en el IDLE (o inicio), guardamos su contexto y chequeamos la 1era tarea
-	if (current_task == INVALID_TASK) {
+	/* guardo contexto actual si es necesario */
+	if (current_task == IDLE_TASK) {
 		idle_task_control.sp = current_context;
-		current_task = 0;
 	}
-	//Si no, guardamos el contexto de la tarea y apuntamos a la próxima tarea (circular)
-	else {
+	else if (current_task < TASK_COUNT) {
 		task_control_list[current_task].sp = current_context;
-
-		current_task++;
-		if (current_task == TASK_COUNT) {
-			current_task = 0;
-		}
-
 	}
 
-	uint32_t Task_Count = TASK_COUNT;
-	//A partir de la proxima, chequeamos todas mientras no estén READY
-	while((task_control_list[current_task].state != TASK_STATE_READY)
-			           && (Task_Count--) > 0 ) {
-		//Cuando estaba en IDLE y no había tareas en READY, no volvía a IDLE sino
-		//Que se quedaba en el loop. Aseguraré que sólo chequee el número de tareas
-		//y salga.
+	/* decido cuál va a ser el contexto siguiente a ejecutar */
+	do {
 		current_task++;
-		if (current_task == TASK_COUNT) {
+		if (current_task > IDLE_TASK) {
 			current_task = 0;
 		}
-
-	}
-
-	if (current_task == previous_task) {
-			//Si volvió a la tarea anterior y no estaba running, no hay tareas para lanzar
-			//así que se debe ir a Idle. En cualquiera de los casos, la tarea debe mantener
-			//su estado, si estaba RUNNING, seguirá RUNNING y si no, no debe ser modificado
-			if (task_control_list[current_task].state != TASK_STATE_RUNNING) {
-				current_task = INVALID_TASK;
-				idle_task_control.state = TASK_STATE_RUNNING;
-				return idle_task_control.sp;
-			}
+		if (current_task == IDLE_TASK) {
+			state = idle_task_control.state;
 		}
-
 		else {
-
-			//Si no volvió a la tarea anterior, hay que evaluar si viene de IDLE
-			//y si se encontró una tarea para lanzar. Si no, se debe volver a IDLE
-			if ((previous_task == INVALID_TASK)) {
-				if (0 == Task_Count){
-					current_task = INVALID_TASK;
-					idle_task_control.state = TASK_STATE_RUNNING;
-					return idle_task_control.sp;
-				} else {
-					idle_task_control.state = TASK_STATE_READY;
-				}
-			}
-			//Si no viene de INVALID se debe cambiar el estado de la tarea anterior a READY
-			//en caso de que estuviera RUNNING
-			else {
-				if (task_control_list[previous_task].state == TASK_STATE_RUNNING) {
-					task_control_list[previous_task].state = TASK_STATE_READY;
-				}
-			}
-			//En cualquiera de los casos, se debe colocar la nueva tarea en RUNNING
-			//(Si la nueva tarea es IDLE, ya se le colocó RUNNING y el return no lo
-			//deja llegar hasta acá)
-			task_control_list[current_task].state = TASK_STATE_RUNNING;
-
+			state = task_control_list[current_task].state;
 		}
+	} while ((state != TASK_STATE_READY)
+			&& (previous_task != current_task)
+			&& (previous_task != INVALID_TASK));
 
-	//Si llegó hasta acá, no cayó en IDLE, así que se devuelve el contexto de la
-	//próxima tarea a ejecutar.
-	return task_control_list[current_task].sp;
+	/* si salí del while encontrando una tarea en estado READY... */
+	if (task_control_list[current_task].state == TASK_STATE_READY) {
+		task_control_list[current_task].state = TASK_STATE_RUNNING;
+		returned_stack = task_control_list[current_task].sp;
+
+		if (previous_task == IDLE_TASK) {
+			idle_task_control.state = TASK_STATE_READY;
+		}
+		else if ((previous_task < TASK_COUNT)
+				&& (task_control_list[previous_task].state == TASK_STATE_RUNNING)) {
+			task_control_list[previous_task].state = TASK_STATE_READY;
+		}
+	}
+	else { /* si no hay tareas READY, ejecuto tarea idle */
+		current_task = IDLE_TASK;
+		idle_task_control.state = TASK_STATE_RUNNING;
+		returned_stack = idle_task_control.sp;
+	}
+	return returned_stack;
 }
 
 void schedule(void)
@@ -253,8 +229,6 @@ int start_os(void)
 
 	/* llamo al scheduler */
 	schedule();
-
-	idle_hook(NULL);
 
 	return -1;
 }
