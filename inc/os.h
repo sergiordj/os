@@ -28,12 +28,13 @@ typedef struct taskDefinition {
 	uint8_t * stack;
 	uint32_t stack_size;
 	entry_point_t entry_point;
+	uint32_t priority;
 	void  * parameter;
 }taskDefinition;
 
 /*==================[external data declaration]==============================*/
 
-extern const taskDefinition task_list[TASK_COUNT];
+extern const taskDefinition task_list[];
 
 /*==================[external functions declaration]=========================*/
 

@@ -14,10 +14,13 @@
 #define INVALID_TASK ((uint32_t)-1)
 
 /** id de tarea idle */
-#define IDLE_TASK (TASK_COUNT)
+#define IDLE_TASK (Task_Count)
 
 /** tamaño de stack de tarea idle */
 #define STACK_IDLE_SIZE 256
+
+/** Cantidad de prioridades definidad */
+#define PRIORITY_COUNT 5
 
 /** estructura interna de control de tareas */
 typedef struct taskControlBlock {
@@ -25,10 +28,13 @@ typedef struct taskControlBlock {
 	const taskDefinition * tdef;
 	taskState state;
 	uint32_t waiting_time;
+	uint32_t scheduled_flag;
 }taskControlBlock;
 
 /*==================[internal data declaration]==============================*/
-
+static uint32_t PriorityBuffer [PRIORITY_COUNT] [Task_Count+1];
+static uint32_t PriorityWritePointer [PRIORITY_COUNT];
+static uint32_t PriorityReadPointer [PRIORITY_COUNT];
 /*==================[internal functions declaration]=========================*/
 
 __attribute__ ((weak)) void * idle_hook(void * p);
@@ -37,14 +43,15 @@ __attribute__ ((weak)) void * idle_hook(void * p);
 
 /** indice a la tarea actual */
 static uint32_t current_task = INVALID_TASK;
+static uint32_t current_priority = 0;
 
 /** estructura interna de control de tareas */
-static taskControlBlock task_control_list[TASK_COUNT];
+static taskControlBlock task_control_list[Task_Count];
 
 /** contexto de la tarea idle */
 uint8_t stack_idle[STACK_IDLE_SIZE];
 static taskDefinition idle_tdef = {
-		stack_idle, STACK_IDLE_SIZE, idle_hook, 0
+		stack_idle, STACK_IDLE_SIZE, idle_hook, 0, 0
 };
 static taskControlBlock idle_task_control;
 
@@ -65,7 +72,8 @@ static void task_create(
 		uint32_t * stack_pointer, /* donde guardar el puntero de pila */
 		entry_point_t entry_point, /* punto de entrada de la tarea */
 		void * parameter, /* parametro de la tarea */
-		taskState * state)
+		taskState * state,
+		uint32_t * scheduled_flag)
 {
 	uint32_t * stack = (uint32_t *)stack_frame;
 
@@ -93,12 +101,15 @@ static void task_create(
 
 	/* seteo estado inicial READY */
 	*state = TASK_STATE_READY;
+
+	/* inicializo el flag de schedule */
+	*scheduled_flag = 0;
 }
 
 void task_delay_update(void)
 {
 	uint32_t i;
-	for (i=0; i<TASK_COUNT; i++) {
+	for (i=0; i<Task_Count; i++) {
 		if ( (task_control_list[i].state == TASK_STATE_WAITING) &&
 				(task_control_list[i].waiting_time > 0)) {
 			task_control_list[i].waiting_time--;
@@ -109,11 +120,42 @@ void task_delay_update(void)
 	}
 }
 
+void priority_buffer_update(void)
+{
+	uint32_t i;
+	for (i=0; i<Task_Count; i++) {
+
+		if ( (task_control_list[i].state == TASK_STATE_READY) && (task_control_list[i].scheduled_flag == 0)) {
+
+			uint32_t Task_Priority = task_control_list[i].tdef->priority;
+			PriorityBuffer [Task_Priority][PriorityWritePointer[Task_Priority]]=i;
+			task_control_list[i].scheduled_flag = 1;
+			PriorityWritePointer[Task_Priority]++;
+
+			if (PriorityWritePointer[Task_Priority] > Task_Count){
+				PriorityWritePointer[Task_Priority] = 0;
+			}
+		}
+	}
+
+	if ( (idle_task_control.state == TASK_STATE_READY) && (idle_task_control.scheduled_flag == 0)) {
+
+		uint32_t Task_Priority = idle_task_control.tdef->priority;
+		PriorityBuffer [Task_Priority][PriorityWritePointer[Task_Priority]]=IDLE_TASK;
+		idle_task_control.scheduled_flag = 1;
+		PriorityWritePointer[Task_Priority]++;
+
+		if (PriorityWritePointer[Task_Priority] > Task_Count){
+			PriorityWritePointer[Task_Priority] = 0;
+		}
+	}
+}
+
 /*==================[external functions definition]==========================*/
 
 void delay(uint32_t milliseconds)
 {
-	if (current_task != INVALID_TASK) {
+	if (current_task != INVALID_TASK && milliseconds > 0) {
 		task_control_list[current_task].state = TASK_STATE_WAITING;
 		task_control_list[current_task].waiting_time = milliseconds;
 		schedule();
@@ -127,65 +169,90 @@ int32_t getNextContext(int32_t current_context)
 {
 	uint32_t previous_task = current_task;
 	uint32_t returned_stack;
-	taskState state;
+	int32_t i;
 
 	/* guardo contexto actual si es necesario */
 	if (current_task == IDLE_TASK) {
 		idle_task_control.sp = current_context;
 	}
-	else if (current_task < TASK_COUNT) {
+	else if (current_task < Task_Count) {
 		task_control_list[current_task].sp = current_context;
 	}
 
-	/* decido cuál va a ser el contexto siguiente a ejecutar */
-	do {
-		current_task++;
-		if (current_task > IDLE_TASK) {
-			current_task = 0;
+	/* Seleccionamos la posible próxima tarea */
+	for (i = (PRIORITY_COUNT-1); i >= 0; i--){
+		if (PriorityReadPointer[i] != PriorityWritePointer[i]){
+			current_task = PriorityBuffer[i][PriorityReadPointer[i]];
+			if (current_task != IDLE_TASK){
+				task_control_list[current_task].scheduled_flag = 0;
+			} else {
+				idle_task_control.scheduled_flag = 0;
+			}
+			PriorityReadPointer[i]++;
+			if (PriorityReadPointer[i] > Task_Count){
+				PriorityReadPointer[i] = 0;
+			}
+			break;
 		}
-		if (current_task == IDLE_TASK) {
-			state = idle_task_control.state;
-		}
-		else {
-			state = task_control_list[current_task].state;
-		}
-	} while ((state != TASK_STATE_READY)
-			&& (previous_task != current_task)
-			&& (previous_task != INVALID_TASK));
+	}
 
-	/* si salí del while encontrando una tarea en estado READY... */
-	if (task_control_list[current_task].state == TASK_STATE_READY) {
-		task_control_list[current_task].state = TASK_STATE_RUNNING;
-		returned_stack = task_control_list[current_task].sp;
-
-		if (previous_task == IDLE_TASK) {
+	if (previous_task != IDLE_TASK){
+		if (current_task != IDLE_TASK){
+			if (task_control_list[current_task].tdef->priority >= current_priority){
+				if (task_control_list[previous_task].state == TASK_STATE_RUNNING){
+					task_control_list[previous_task].state = TASK_STATE_READY;
+				}
+				task_control_list[current_task].state = TASK_STATE_RUNNING;
+				current_priority = task_control_list[current_task].tdef->priority;
+				returned_stack = task_control_list[current_task].sp;
+			} else {
+				if (task_control_list[previous_task].state == TASK_STATE_RUNNING){
+					returned_stack = task_control_list[previous_task].sp;
+				} else {
+					current_priority = task_control_list[current_task].tdef->priority;
+					returned_stack = task_control_list[current_task].sp;
+				}
+			}
+		} else {
+			if ((task_control_list[previous_task].state != TASK_STATE_RUNNING)){
+				idle_task_control.state = TASK_STATE_RUNNING;
+				current_priority = idle_task_control.tdef->priority;
+				returned_stack = idle_task_control.sp;
+			} else {
+				returned_stack = task_control_list[previous_task].sp;
+			}
+		}
+	} else {
+		if (current_task != IDLE_TASK){
 			idle_task_control.state = TASK_STATE_READY;
-		}
-		else if ((previous_task < TASK_COUNT)
-				&& (task_control_list[previous_task].state == TASK_STATE_RUNNING)) {
-			task_control_list[previous_task].state = TASK_STATE_READY;
+			task_control_list[current_task].state = TASK_STATE_RUNNING;
+			current_priority = task_control_list[current_task].tdef->priority;
+			returned_stack = task_control_list[current_task].sp;
+		} else {
+			returned_stack = idle_task_control.sp;
 		}
 	}
-	else { /* si no hay tareas READY, ejecuto tarea idle */
-		current_task = IDLE_TASK;
-		idle_task_control.state = TASK_STATE_RUNNING;
-		returned_stack = idle_task_control.sp;
-	}
+
 	return returned_stack;
 }
 
 void schedule(void)
 {
+	/*Lleno las listas de prioridad */
+	priority_buffer_update();
+
 	/* activo PendSV para llevar a cabo el cambio de contexto */
 	SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
 
 	/* Instruction Synchronization Barrier: aseguramos que se
 	 * ejecuten todas las instrucciones en  el pipeline
-	 */
+	 * */
+
 	__ISB();
 	/* Data Synchronization Barrier: aseguramos que se
 	 * completen todos los accesos a memoria
-	 */
+	 * */
+
 	__DSB();
 }
 
@@ -209,10 +276,11 @@ int start_os(void)
 			&(idle_task_control.sp),
 			idle_task_control.tdef->entry_point,
 			idle_task_control.tdef->parameter,
-			&(idle_task_control.state));
+			&(idle_task_control.state),
+			&(idle_task_control.scheduled_flag));
 
-	/* inicializo contextos iniciales de cada tarea */
-	for (i=0; i<TASK_COUNT; i++) {
+	/** inicializo contextos iniciales de cada tarea */
+	for (i=0; i<Task_Count; i++) {
 		task_control_list[i].tdef = task_list+i;
 
 		task_create(task_control_list[i].tdef->stack,
@@ -220,14 +288,23 @@ int start_os(void)
 				&(task_control_list[i].sp),
 				task_control_list[i].tdef->entry_point,
 				task_control_list[i].tdef->parameter,
-				&(task_control_list[i].state));
+				&(task_control_list[i].state),
+				&(task_control_list[i].scheduled_flag));
+	}
+
+	/** Inicializo los punteros del buffer de prioridades */
+	for (i = 0; i<PRIORITY_COUNT; i++){
+		PriorityWritePointer[i]=0;
+		PriorityReadPointer[i]=0;
 	}
 
 	/* configuro PendSV con la prioridad más baja */
 	NVIC_SetPriority(PendSV_IRQn, 255);
+
+	/* Configuro el systick para un tick cada milisegundo */
 	SysTick_Config(SystemCoreClock / 1000);
 
-	/* llamo al scheduler */
+	/* Lleno las listas de prioridad y llamo al scheduler */
 	schedule();
 
 	return -1;

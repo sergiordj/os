@@ -7,6 +7,10 @@
 
 /** tamaño de pila para los threads */
 #define STACK_SIZE 512
+#define ROJORGB 0
+#define AMARILLO 3
+#define ROJO 4
+#define VERDE 5
 
 /*==================[internal data declaration]==============================*/
 
@@ -14,6 +18,8 @@
 
 static void * tarea1(void * param);
 static void * tarea2(void * param);
+static void * tarea3(void * param);
+static void * tarea4(void * param);
 
 /*==================[internal data definition]===============================*/
 
@@ -22,29 +28,71 @@ static void * tarea2(void * param);
 /* pilas de cada tarea */
 uint8_t stack1[STACK_SIZE];
 uint8_t stack2[STACK_SIZE];
+uint8_t stack3[STACK_SIZE];
+uint8_t stack4[STACK_SIZE];
 
-const taskDefinition task_list[TASK_COUNT] = {
-		{stack1, STACK_SIZE, tarea1, (void *)0xAAAAAAAA},
-		{stack2, STACK_SIZE, tarea2, (void *)0xBBBBBBBB}
+const taskDefinition task_list[] = {
+		{stack1, STACK_SIZE, tarea1, 1, (void *)0xAAAAAAAA},
+		{stack2, STACK_SIZE, tarea2, 3, (void *)0xBBBBBBBB},
+		{stack3, STACK_SIZE, tarea3, 4, (void *)0xBBBBBBBB},
+		{stack4, STACK_SIZE, tarea4, 2, (void *)0xBBBBBBBB}
 };
+
 
 /*==================[internal functions definition]==========================*/
 
 static void * tarea1(void * param)
 {
+	float i = 1;
+	int32_t a;
 	while (1) {
-		Board_LED_Toggle(0);
-		delay(500);
+		Board_LED_Toggle(ROJO);
+		a = i*500;
+		delay(a);
+		//for (a=0; a<0xAAAAAA; a++);
+		i += 0.1;
 	}
 	return (void *)0; /* a dónde va? */
 }
 
 static void * tarea2(void * param)
 {
-	int j=4;
-	while (j) {
-		Board_LED_Toggle(3);
-		for(j=0; j<0xFFFFF; j++);
+	float i = 1;
+	int32_t a;
+	while (1) {
+		Board_LED_Toggle(VERDE);
+		a = i*100;
+		delay(a);
+		//for (i=0; i<0xFFFFFF; i++);
+		i += 0.1;
+	}
+	return (void *)4; /* a dónde va? */
+}
+
+static void * tarea3(void * param)
+{
+	float i = 1;
+	int32_t a;
+	while (1) {
+		Board_LED_Toggle(ROJORGB);
+		a = i*200;
+		delay(a);
+		//for (i=0; i<0xFFFFFF; i++);
+		i += 0.1;
+	}
+	return (void *)4; /* a dónde va? */
+}
+
+static void * tarea4(void * param)
+{
+	float i = 1;
+	int32_t a;
+	while (1) {
+		Board_LED_Toggle(AMARILLO);
+		a = i*300;
+		delay(a);
+		//for (i=0; i<0xFFFFFF; i++);
+		i += 0.1;
 	}
 	return (void *)4; /* a dónde va? */
 }
